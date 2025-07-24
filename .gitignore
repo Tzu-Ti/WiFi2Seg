@@ -1,0 +1,15 @@
+__pycache__
+*/__pycache__
+
+# training data
+test.json
+train&val.json
+val.json
+
+# training logs
+lightning_logs
+
+# openpose
+benchmark/PersonInWiFi/openpose
+
+!Wi-Seg

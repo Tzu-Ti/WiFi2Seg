@@ -1,0 +1,29 @@
+Model:
+  latent_dim: 512
+
+
+Data:
+  length: 51
+  RxTx_num: 6
+  subcarrier_num: 2025
+
+Dataset:
+  data_root: '/root/SSD/PiWiFi/UNCC' # '/root/bindingvolume/CSI_dataset_NYCU/'
+  train&val_json_path: '/root/CoWIP/benchmark/Wi-Seg/datas/UNCC/train&val.json'
+  val_json_path: '/root/CoWIP/benchmark/Wi-Seg/datas/UNCC/val.json'
+  batch_size: 64
+  num_workers: 24
+
+TestDataset:
+  # NYCU
+  # test_data_root: '/root/SSD/PiWiFi/NYCU'
+  # test_json_path: '/root/CoWIP/benchmark/Wi-Seg/datas/NYCU/test.json'
+  # UNCC
+  test_data_root: '/root/SSD/PiWiFi/UNCC' 
+  test_json_path: '/root/CoWIP/benchmark/Wi-Seg/datas/UNCC/test.json'
+  mode: 'test'
+
+Training:
+  lr: 1.0e-4
+  epochs: 150
+  optimizer: 'adam'  # Options: 'adam', 'adamw'
