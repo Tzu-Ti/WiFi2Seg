@@ -36,9 +36,9 @@ Dataset:
   num_workers: 24
 
 TestDataset:
-  test_data_root: '/root/bindingvolume/CSI_dataset_UNCC' # '/root/bindingvolume/CSI_dataset_UNCC'
-  test_json_path: 'datas/UNCC/test.json' # '/root/workspace/CoWIP/datas/UNCC/test.json'
-  mode: 'test'
+  test_data_root: '/root/bindingvolume/CSI_dataset_NYCU' # '/root/bindingvolume/CSI_dataset_UNCC'
+  test_json_path: 'datas/NYCU/train&val.json' # '/root/workspace/CoWIP/datas/UNCC/test.json'
+  mode: 'val'
 
 Training:
   lr: 1.0e-5

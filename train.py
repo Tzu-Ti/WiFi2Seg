@@ -199,6 +199,8 @@ class CSIEncoderLightning(LightningModule):
         else:
             out, mu, logvar = self.forward(amp, pha)
         
+        out = torch.sigmoid(out)
+        out = (out > 0.5).float()
         dice = self.DICE(out, mask)
         iou = self.IoU(out.float(), mask.long())
 
