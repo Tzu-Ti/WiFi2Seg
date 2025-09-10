@@ -19,10 +19,8 @@ def get_data_list(json_path: str, mode: str):
 
     Return:
     data_list: the data list of the CSI
-        ["/root/SSD/PiWiFi/NYCU/Env4/npy/F3/5_posi/240508_152018/1715152876595249214.npz",
-        "/root/SSD/PiWiFi/NYCU/Env3/npy/M3/5_posi/240508_105725/1715137086843263338.npz", ...]
-        ["/root/bindingvolume/CSI_dataset_UNCC/Env2/npy/F1/1_posi/241102_134944/1730569892598354411.npz",
-        "/root/bindingvolume/CSI_dataset_UNCC/Env1/npy/F2/1_posi/241102_144833/1730573381748239710.npz", ...]
+        ["/root/bindingvolume/CSI_UNCC/parsed/csi0/test_set/M2/posi/241103_170934/1730671877851838316.npz",
+        "/root/bindingvolume/CSI_UNCC/parsed/csi0/test_set/M2/posi/241103_170934/1730671867110087557.npz", ...]
     """
     with open(json_path, 'r') as f:
         data_list = json.load(f)
@@ -79,7 +77,7 @@ class MaskDataset(Dataset):
     def __getitem__(self, index):
         csi_path = self.data_list[index]
         
-        mask_path = csi_path.replace('npy', 'img').replace('.npz', '_mask.png')
+        mask_path = csi_path.replace('csi0', 'rgb').replace('.npz', '_mask.png')
         mask = self._get_mask(mask_path)
 
         return mask

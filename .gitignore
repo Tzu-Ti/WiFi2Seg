@@ -4,4 +4,4 @@ __pycache__/
 lightning_logs/
 
 # openpose
-benchmark/PersonInWiFi/openpose
+datas/preprocess/skeleton/openpose

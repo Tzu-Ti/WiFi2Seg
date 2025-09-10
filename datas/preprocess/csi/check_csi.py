@@ -1,0 +1,134 @@
+from picoscenes import Picoscenes
+import argparse
+import glob, os
+import numpy as np
+from threading import Thread
+from tqdm import tqdm
+
+def parser():
+    parser = argparse.ArgumentParser(description="Parser for CSI dataset preprocessing")
+    # data path
+    parser.add_argument("--dataset_root", required=True, help="Path to the root directory of the CSI dataset")
+    parser.add_argument("--glob_path", required=True, help="Glob path to find the CSI files")
+    # data settings
+    parser.add_argument("--csi_subcarrier", type=int, default=2025, help="Number of subcarriers in CSI data")
+    parser.add_argument("--csi_length", type=int, default=25, help="Length of CSI data")
+    # multi processing
+    parser.add_argument("--num_workers", type=int, default=1, help="Number of workers for multiprocessing")
+    return parser.parse_args()
+
+def bin_search(arr, target):
+    # return target index or the index of closest value to target
+    left, right = 0, len(arr) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    left = min(len(arr) - 1, max(0, left))
+    right = max(0, min(len(arr) - 1, right))
+    try:
+        return right if abs(arr[right] - target) < abs(arr[left] - target) else left
+    except:
+        print(f"len(arr):{len(arr)}, target:{target}, left:{left}, right:{right}")
+        exit()
+
+def parse_csi(rx_file, csi_subcarrier, csi_length):
+    # read csi data
+    # print(f"Reading  {rx_file}...")
+    rx_csi = Picoscenes(rx_file)
+    # print("CSI data have been read")
+
+    # parsing csi
+    # print("Parsing CSI data...")
+    rx_frames_dict = {}
+    for rx_frames in rx_csi.raw:
+        if len(rx_frames.get('CSI').get('SubcarrierIndex')) != csi_subcarrier:
+            raise ValueError(f"Expected rx have {csi_subcarrier} subcarriers, but got {len(rx_frames.get('CSI').get('SubcarrierIndex'))}")
+        # store the magnitude and phase of each csi frame, key is the timestamp
+        rx_frames_dict[rx_frames.get('RxSBasic').get('systemns')] = {
+            'Mag': np.array(rx_frames.get('CSI').get('Mag')),
+            'Phase': np.array(rx_frames.get('CSI').get('Phase')),
+        }
+    # print("CSI data have been parsed")
+    return rx_frames_dict
+
+def linear_fitting(data):
+    for i in range(len(data)):
+        for j in range(len(data[i])):
+            noise_0 = np.poly1d(np.polyfit(np.arange(1001), data[i, j, :1001], 1))(np.arange(1001))
+            noise_mid = np.poly1d(np.polyfit(np.arange(1001, 1024), data[i, j, 1001:1024], 1))(np.arange(1001, 1024))
+            noise_1 = np.poly1d(np.polyfit(np.arange(1024, 1997), data[i, j, 1024:1997], 1))(np.arange(1024, 1997))
+            noise_tail = np.poly1d(np.polyfit(np.arange(1997, 2025), data[i, j, 1997:], 1))(np.arange(1997, 2025))
+            noise = np.concatenate([noise_0, noise_mid, noise_1, noise_tail], axis=0)
+            data[i, j, :] = data[i, j, :] - noise
+    return data
+
+def register_csi_image(rx_files, rx_name, image_folders, csi_subcarrier, csi_length):
+    for rx_file, img_folder in tqdm(zip(rx_files, image_folders), total=len(rx_files), desc=f"Processing {rx_name}"):
+        print(rx_file)
+        rx_frames_dict = parse_csi(rx_file, csi_subcarrier, csi_length)
+
+        img_paths = sorted(glob.glob(os.path.join(img_folder, "*.jpg")))
+        # print(len(img_paths), "images found in", img_folder)
+
+        # the timestamp of each csi frames in one .csi
+        rx_timestamps = list(rx_frames_dict.keys())
+
+        finded = 0
+        # parsing image
+        for img_path in img_paths:
+            img_name = os.path.basename(img_path) # get img name
+            img_name = os.path.splitext(img_name)[0] # without extension
+            timestamp = int(img_name)
+
+            # find the closest csi frame to the image timestamp
+            center_ts_index = bin_search(rx_timestamps, timestamp)
+
+            # check there are enough csi frames around the image timestamp
+            if center_ts_index > csi_length and center_ts_index < len(rx_timestamps) - csi_length:
+                # get the csi frames around the image timestamp
+                frames_ts = rx_timestamps[center_ts_index - csi_length:center_ts_index + csi_length + 1]
+            else: frames_ts = None
+            
+            if frames_ts:
+                finded += 1
+        
+        print(f"Found {finded} images with enough csi frames.")
+        if finded == 0:
+            with open('problem data.txt', 'a') as f:
+                f.write(f"{img_folder}\n")
+        print("-------------------------------------")
+
+def job(rx0_files, rx1_files, rx2_files, image_folders, csi_subcarrier, csi_length):
+    register_csi_image(rx0_files, 'csi0', image_folders, csi_subcarrier, csi_length)
+    register_csi_image(rx1_files, 'csi1', image_folders, csi_subcarrier, csi_length)
+    register_csi_image(rx2_files, 'csi2', image_folders, csi_subcarrier, csi_length)
+
+def main():
+    args = parser()
+
+    # glob csi paths
+    rx0_files = sorted(glob.glob(os.path.join(args.dataset_root, "csi0", args.glob_path, "*", "*.csi")))
+    rx1_files = sorted(glob.glob(os.path.join(args.dataset_root, "csi1", args.glob_path, "*", "*.csi")))
+    rx2_files = sorted(glob.glob(os.path.join(args.dataset_root, "csi2", args.glob_path, "*", "*.csi")))
+    print(f"Found {len(rx0_files)} CSI files in csi0")
+    print(f"Found {len(rx1_files)} CSI files in csi1")
+    print(f"Found {len(rx2_files)} CSI files in csi2")
+
+    # glob image paths
+    image_folders = sorted(glob.glob(os.path.join(args.dataset_root, "rgb", args.glob_path, "*")))
+
+    print(f"Found {len(image_folders)} image files in rgb")
+
+    # check data length
+    if not (len(rx0_files) == len(rx1_files) == len(rx2_files) == len(image_folders)):
+        raise ValueError("The number of CSI files and image files do not match.")
+
+    job(rx0_files, rx1_files, rx2_files, image_folders, args.csi_subcarrier, args.csi_length)
+
+if __name__ == '__main__':
+    main()

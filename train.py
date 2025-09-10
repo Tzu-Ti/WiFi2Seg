@@ -84,7 +84,7 @@ class CSIEncoderLightning(LightningModule):
                            latent_dim=latent_dim)
         if vae_ckpt is not None:
             print("> Loading VAE checkpoint from:", vae_ckpt)
-            self.vae = utils.load_ckpt(self.vae, vae_ckpt, freeze=True)
+            self.vae = utils.load_ckpt(self.vae, vae_ckpt, freeze=training_config['vae_freeze'])
 
         # Loss functions
         self.BCE = nn.BCEWithLogitsLoss(reduction='mean')
@@ -252,9 +252,13 @@ def main(args):
             precision='16-mixed',
             log_every_n_steps=100,
             num_sanity_val_steps=5,
-            # fast_dev_run=True
+            # fast_dev_run=True,
+            strategy="ddp_find_unused_parameters_true",
         )
-        trainer.fit(model, dm)
+        if args.ckpt_path:
+            trainer.fit(model, dm, ckpt_path=args.ckpt_path)
+        else:
+            trainer.fit(model, dm)
     elif args.mode == 'test':
         trainer = Trainer(logger=logger, num_nodes=1)
         trainer.test(model, datamodule=dm, ckpt_path=args.ckpt_path)
