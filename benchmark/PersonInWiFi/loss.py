@@ -9,6 +9,7 @@ class MWLoss(nn.Module):
         self.MSE = nn.MSELoss(reduction='none')
 
     def forward(self, pred, gt):
-        mw = self.k * gt + self.b * torch.where(gt > 0.5, 1, 0)
+        indicator = torch.where(gt >= 0, 1.0, -1.0)
+        mw = self.k * gt + self.b * indicator
         loss = torch.mean(mw * self.MSE(pred, gt))
         return loss

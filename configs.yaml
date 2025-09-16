@@ -26,25 +26,24 @@ Aggregation:
 Data:
   length: 51
   RxTx_num: 6
-  subcarrier_num: 2025
+  subcarrier_num: 1974
 
 Dataset:
-  data_root: '/root/bindingvolume/CSI_dataset_NYCU/'
-  train&val_json_path: 'datas/NYCU/train&val.json'
-  val_json_path: 'datas/NYCU/val.json'
+  data_root: '/root/bindingvolume/CSI_UNCC'
+  train&val_json_path: 'datas/UNCC/train&val.json'
+  val_json_path: 'datas/UNCC/val.json'
   batch_size: 128
   num_workers: 24
 
 TestDataset:
-  test_data_root: '/root/bindingvolume/CSI_dataset_NYCU' # '/root/bindingvolume/CSI_dataset_UNCC'
-  test_json_path: 'datas/NYCU/train&val.json' # '/root/workspace/CoWIP/datas/UNCC/test.json'
-  mode: 'val'
+  test_data_root: '/root/bindingvolume/CSI_UNCC' # '/root/bindingvolume/CSI_dataset_UNCC'
+  test_json_path: 'datas/UNCC/test.json' # '/root/workspace/CoWIP/datas/UNCC/test.json'
 
 Training:
   lr: 1.0e-4
   epochs: 100
   optimizer: 'adamw'  # Options: 'adam', 'adamw'
-  vae_ckpt_path: 
-  vae_freeze: 
-  # vae_ckpt_path: '/root/workspace/WiFi2Seg/lightning_logs/VAE/0807_VAE_NYCU_large_batch/checkpoints/epoch=47-step=68736.ckpt'
-  # vae_freeze: false
+  # vae_ckpt_path: 
+  # vae_freeze: 
+  vae_ckpt_path: '/root/workspace/WiFi2Seg/lightning_logs/VAE/0807_VAE_NYCU_large_batch/checkpoints/epoch=47-step=68736.ckpt'
+  vae_freeze: true

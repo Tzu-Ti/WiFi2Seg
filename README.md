@@ -26,3 +26,10 @@ The json file will be like:
     'data': [xxx.npz, xxx.npz]
 }
 ```
+
+## Training VAE
+
+## Training WiFi2Seg
+```shell=
+$ python3 train.py --configs configs.yaml --mode train -v test
+```

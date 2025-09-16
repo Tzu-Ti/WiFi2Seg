@@ -1,4 +1,4 @@
-from datas.dataset import CSI2MaskDataset, CSI2MaskDataModule
+from datas.dataset import MultiEnv_CSI2Mask_DataModule, MultiEnv_CSI2Mask_Dataset
 from models import embedding, encoder, modules, VAE
 import utils
 import loss
@@ -28,7 +28,7 @@ class CSIEncoderLightning(LightningModule):
         data_configs = configs['Data']
         length = data_configs['length'] # 51
         RxTx_num = data_configs['RxTx_num'] # 6
-        in_channels = data_configs['subcarrier_num'] # 2025
+        in_channels = data_configs['subcarrier_num'] # 1974
 
         # CSI Encoder configurations
         ha_configs = configs['HybridAttention']
@@ -237,7 +237,7 @@ def main(args):
     training_config = configs['Training']
 
     # Setup data module
-    dm = CSI2MaskDataModule(dataset_class=CSI2MaskDataset, configs=configs)
+    dm = MultiEnv_CSI2Mask_DataModule(dataset_class=MultiEnv_CSI2Mask_Dataset, configs=configs)
 
     # Setup Tensorboard logger
     logger = TensorBoardLogger("lightning_logs", 

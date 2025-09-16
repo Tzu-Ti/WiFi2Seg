@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 import os
 
-def get_data_list(json_path: str, mode: str):
+def get_data_list(json_path: str, mode: str = None):
     """
     Get the data list from the json file
     :param json_path: the file contain data path
@@ -25,29 +25,27 @@ def get_data_list(json_path: str, mode: str):
     with open(json_path, 'r') as f:
         data_list = json.load(f)
 
-    return data_list[mode]
+    if mode is None:
+        # whole dataset
+        return data_list['data']
+    else:
+        # split dataset
+        assert mode in ['train', 'val', 'test'], "mode should be one of ['train', 'val', 'test']"
+        return data_list[mode]
 
-class MaskDataset(Dataset):
-    def __init__(self,
-                 json_path: str, data_root: str, mode: str = 'train',
-                 size: tuple = (192, 256)):
+class BaseDataset(Dataset):
+    def __init__(self, 
+                 json_path: str, data_root: str, mode: str = None):
         """
-        CSI2Mask dataset
+        Base dataset
         :param json_path: the file contain data path
         :param mode: dataset mode, ["train", "val", "test"]
-        :param size: the size of mask
         """
         self.mode = mode
 
         # Get the data list
         self.data_list = get_data_list(json_path, mode)
         self.data_list = [os.path.join(data_root, data) for data in self.data_list]
-
-        # For transform mask data
-        self.transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Resize(size, interpolation=InterpolationMode.NEAREST),
-        ])
 
     def _normalize(self, x: torch.Tensor, mean: float = 0, std: float = 0.5):
         """
@@ -60,6 +58,32 @@ class MaskDataset(Dataset):
         normalized data
         """
         return ((x - x.mean()) / x.std()) * std + mean
+    
+    def __len__(self):
+        return len(self.data_list)
+
+class MaskDataset(BaseDataset):
+    def __init__(self,
+                 json_path: str, data_root: str, mode: str = None,
+                 size: tuple = (192, 256)):
+        """
+        CSI2Mask dataset
+        :param json_path: the file contain data path
+        :param mode: dataset mode, ["train", "val", "test"]
+        :param size: the size of mask
+        """
+        super().__init__(json_path=json_path, data_root=data_root, mode=mode)
+        self.mode = mode
+
+        # Get the data list
+        self.data_list = get_data_list(json_path, mode)
+        self.data_list = [os.path.join(data_root, data) for data in self.data_list]
+
+        # For transform mask data
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize(size, interpolation=InterpolationMode.NEAREST),
+        ])
 
     def _get_mask(self, mask_path):
         """
@@ -81,28 +105,131 @@ class MaskDataset(Dataset):
         mask = self._get_mask(mask_path)
 
         return mask
-
-    def __len__(self):
-        return len(self.data_list)
-
-class CSI2MaskDataset(MaskDataset):
+    
+class CSIDataset(BaseDataset):
     def __init__(self,
-                 json_path: str, data_root: str, mode: str = 'train',
+                 json_path: str, data_root: str, mode: str = None,
+                 major: str = 'csi0', receivers: list = ['csi0', 'csi1', 'csi2']):
+        """
+        CSI dataset
+        :param json_path: the file contain data path
+        :param mode: dataset mode, ["train", "val", "test"]
+        :param major: the major receiver
+        :param receivers: the list of all receivers
+        """
+        super().__init__(json_path=json_path, data_root=data_root, mode=mode)
+        
+        self.mode = mode
+        self.major = major
+        self.receivers = receivers
+
+    def _read_csi(self, csi_path: str):
+        """
+        Read the CSI data from the npz file
+        :param csi_path: the path of the npz file
+
+        Return:
+        csi: the CSI data
+        """
+        csi = np.load(csi_path)
+
+        # parse the data to amplitude and phase
+        amp = csi['mag']
+        amp = torch.from_numpy(amp)
+        amp = self._normalize(amp)
+
+        pha = csi['phase']
+        pha = torch.from_numpy(pha)
+        pha = self._normalize(pha)
+
+        return amp, pha
+
+    def _get_all_csi(self, major_csi_path: str):
+        """
+        Get the CSI data from all receivers npz file
+        :param major_csi_path: the path of the major npz file
+
+        Return:
+        csi: the CSI data
+        """
+        # read the major csi data
+        amp, pha = self._read_csi(major_csi_path)
+
+        # read the other csi data and concatenate
+        for r in self.receivers:
+            if r == self.major:
+                continue
+            csi_path = major_csi_path.replace(self.major, r)
+            if not os.path.exists(csi_path):
+                raise FileNotFoundError(f"{csi_path} not found")
+            r_amp, r_pha = self._read_csi(csi_path)
+            amp = torch.cat((amp, r_amp), dim=1)
+            pha = torch.cat((pha, r_pha), dim=1)
+            
+        return amp, pha
+
+    def __getitem__(self, index):
+        major_csi_path = self.data_list[index]
+
+        amp, pha = self._get_all_csi(major_csi_path)
+
+        return amp, pha
+    
+class PoseDataset(BaseDataset):
+    def __init__(self,
+                 json_path: str, data_root: str, mode: str = None,
+                 size: tuple = (192, 256)):
+        """
+        Pose dataset
+        :param json_path: the file contain data path
+        :param mode: dataset mode, ["train", "val", "test"]
+        :param size: the size of pose
+        """
+        super().__init__(json_path=json_path, data_root=data_root, mode=mode)
+
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize(size, interpolation=InterpolationMode.NEAREST),
+        ])
+
+    def _get_pose(self, pose_path):
+        """
+        Get the pose data from the npy file
+        :param pose_path: the path of the npy file
+
+        Return:
+        pose: the pose data
+        """
+        pose = np.load(pose_path)
+        pose = np.transpose(pose, (1, 2, 0))
+        jhm = self.transform(pose[:, :, :26])
+        paf = self.transform(pose[:, :, 26:])
+
+        return jhm, paf
+
+    def __getitem__(self, index):
+        csi_path = self.data_list[index]
+        
+        pose_path = csi_path.replace('csi0', '2d_pose').replace('.npz', '.npy')
+        jhm, paf = self._get_pose(pose_path)
+
+        return jhm, paf
+
+class MultiEnv_CSI2Mask_Dataset(CSIDataset, MaskDataset):
+    def __init__(self,
+                 json_path: str, data_root: str, mode: str = None,
                  size: tuple = (192, 256),
-                 amp_offset: float = 60000, pha_offset: float = 28000):
+                 major: str = 'csi0', receivers: list = ['csi0', 'csi1', 'csi2']):
         """
         CSI2Mask dataset
         :param json_path: the file contain data path
         :param mode: dataset mode, ["train", "val", "test"]
         :param size: the size of mask
-        :param amp_offset: the offset of amplitude data
-        :param pha_offset: the offset of phase data
         """
-        super().__init__(json_path=json_path, data_root=data_root, mode=mode, size=size)
-        
+        MaskDataset.__init__(self, json_path=json_path, data_root=data_root, mode=mode, size=size)
+        CSIDataset.__init__(self, json_path=json_path, data_root=data_root, mode=mode, major=major, receivers=receivers)
+
         self.mode = mode
-        self.amp_offset = amp_offset
-        self.pha_offset = pha_offset
 
         # Accroding to the Env, classify the data into different Env
         self.env_dict = {}
@@ -122,35 +249,15 @@ class CSI2MaskDataset(MaskDataset):
         """
         parts = csi_path.split('/')
         for part in parts:
-            if 'Env' in part or '_set' in part:
+            if 'env' in part or '_set' in part:
                 env = part
         return env
 
-    def _get_csi(self, csi_path: str):
-        """
-        Get the CSI data from the npz file
-        :param csi_path: the path of the npz file
-
-        Return:
-        csi: the CSI data
-        """
-        csi = np.load(csi_path)
-
-        # parse the data to amplitude and phase
-        amp = csi['mag'].astype(np.float32) / self.amp_offset
-        amp = torch.from_numpy(amp)
-        amp = self._normalize(amp)
-
-        pha = csi['pha'].astype(np.float32) / self.pha_offset
-        pha = torch.from_numpy(pha)
-        pha = self._normalize(pha)
-        
-        return amp, pha
-
     def __getitem__(self, index):
-        csi_path = self.data_list[index]
-        env = self._get_env(csi_path)
-        amp, pha = self._get_csi(csi_path)
+        major_csi_path = self.data_list[index]
+
+        env = self._get_env(major_csi_path)
+        amp, pha = self._get_all_csi(major_csi_path)
         
         # choose another data in the same or different env
         if self.mode == 'train':
@@ -164,11 +271,10 @@ class CSI2MaskDataset(MaskDataset):
                 label = -1
         
             another_csi_path = np.random.choice(self.env_dict[another_env])
-            another_amp, another_pha = self._get_csi(another_csi_path)
+            another_amp, another_pha = self._get_all_csi(another_csi_path)
 
         # mask
-        mask_path = csi_path.replace('npy', 'img').replace('.npz', '_mask.png')
-        rgb_path = csi_path.replace('npy', 'img').replace('.npz', '.jpg')
+        mask_path = major_csi_path.replace(self.major, 'mask').replace('.npz', '_mask.png')
         mask = self._get_mask(mask_path)
 
         if self.mode == 'train':
@@ -176,10 +282,7 @@ class CSI2MaskDataset(MaskDataset):
         else:
             return amp, pha, mask
 
-    def __len__(self):
-        return len(self.data_list)
-
-class CSI2MaskDataModule(LightningDataModule):
+class MultiEnv_CSI2Mask_DataModule(LightningDataModule):
     def __init__(self, dataset_class, configs):
         super().__init__()
 
@@ -193,7 +296,6 @@ class CSI2MaskDataModule(LightningDataModule):
         test_dataset_config = configs['TestDataset']
         self.test_data_root = test_dataset_config['test_data_root']
         self.test_json_path = test_dataset_config['test_json_path']
-        self.test_mode = test_dataset_config['mode']
 
         self.batch_size = dataset_config['batch_size']
         self.num_workers = dataset_config['num_workers']
@@ -213,13 +315,11 @@ class CSI2MaskDataModule(LightningDataModule):
             self.val_dataset_unseen = self.dataset_class(
                 json_path=self.val_json_path,
                 data_root=self.data_root,
-                mode='val'
             )
         elif stage == 'test':
             self.test_dataset = self.dataset_class(
                 json_path=self.test_json_path,
                 data_root=self.test_data_root,
-                mode=self.test_mode
             )
 
     def dataloader(self, dataset, shuffle):
@@ -242,15 +342,19 @@ class CSI2MaskDataModule(LightningDataModule):
         return dataloader
 
 if __name__ == '__main__':
-    json_path = '/root/workspace/CoWIP/datas/NYCU/train&val.json'
-    dataset = CSI2MaskDataset(json_path=json_path, data_root='/root/bindingvolume/CSI_dataset_NYCU', mode='train')
+    json_path = '/root/workspace/WiFi2Seg/datas/UNCC/test.json'
+    # dataset = MultiEnv_CSI2Mask_Dataset(json_path=json_path, data_root='/root/bindingvolume/CSI_UNCC')
+    # for i in range(len(dataset)):
+    #     [amp1, pha1, mask], [amp2, pha2], label = dataset[i]
+    #     print(amp1.shape)
+    #     print(pha1.shape)
+    #     print(mask.shape)
+    #     print(amp2.shape)
+    #     print(pha2.shape)
+    #     break
+    dataset = PoseDataset(json_path=json_path, data_root='/root/bindingvolume/CSI_UNCC')
     for i in range(len(dataset)):
-        [amp1, pha1, mask], [amp2, pha2], label = dataset[i]
-        print(amp1.shape)
-        print(pha1.shape)
-        print(mask.shape)
-        print(amp2.shape)
-        print(pha2.shape)
-        # [amp1, pha1, mask], _, _ = dataset[i]
+        jhm, paf = dataset[i]
+        print(f'jhm shape: {jhm.shape}, paf shape: {paf.shape}')
         break
         
