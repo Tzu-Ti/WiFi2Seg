@@ -57,6 +57,14 @@ def parse_csi(rx_file, csi_subcarrier, csi_length):
     # print("CSI data have been parsed")
     return rx_frames_dict
 
+def remove_guard_and_pilot(data):
+    if data.shape[2] == 1974:
+        return data
+    first = data[:, :, :1001]
+    second = data[:, :, 1024:1997]
+    data = np.concatenate((first, second), axis=2)
+    return data
+
 def linear_fitting(data):
     for i in range(len(data)):
         for j in range(len(data[i])):
@@ -131,9 +139,8 @@ def register_csi_image(rx_files, rx_name, image_folders, csi_subcarrier, csi_len
                         frame_phase = np.concatenate([frame_phase, np.expand_dims(phases, axis=0)], axis=0)
                 
                 # remove pilot and guard
-                first_frame_phase = frame_phase[:, :, :1001]
-                second_frame_phase = frame_phase[:, :, 1024:1997]
-                frame_phase = np.concatenate((first_frame_phase, second_frame_phase), axis=2)
+                frame_phase = remove_guard_and_pilot(frame_phase)
+                frame_mag = remove_guard_and_pilot(frame_mag)
                 # phase, linear fitting to remove noise
                 frame_phase = linear_fitting(frame_phase)
                 # convert to float32
