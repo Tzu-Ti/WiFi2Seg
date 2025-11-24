@@ -221,7 +221,7 @@ class MultiEnv_CSI2Mask_Dataset(CSIDataset, MaskDataset):
                  size: tuple = (192, 256),
                  major: str = 'csi0', receivers: list = ['csi0', 'csi1', 'csi2']):
         """
-        CSI2Mask dataset
+        Multi Environment CSI2Mask Dataset
         :param json_path: the file contain data path
         :param mode: dataset mode, ["train", "val", "test"]
         :param size: the size of mask

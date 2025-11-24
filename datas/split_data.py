@@ -8,9 +8,11 @@ from tqdm import tqdm
 def parse_args():
     """
     example
-    :param data_root: /root/SSD/PiWiFi/NYCU
-    :param person_number: 1
-    :param mode: train (or val, test. train -> train&val.json, val -> val.json, test -> test.json)
+    :param raw_data_root: /root/bindingvolume/CSI_UNCC/raw/
+    :param glob_path: env*/[FM][12]/*/*
+    :param mode: split
+    :param name: train&val
+    :param ratio: 8:2
     """
     parser = argparse.ArgumentParser(description="Split data script")
     parser.add_argument('--raw_data_root', required=True, help='Root directory of the raw data')
@@ -22,7 +24,9 @@ def parse_args():
 
 def main():
     args = parse_args()
-    print(f"Data root directory: {args.raw_data_root}")
+    print(f"Raw data root directory: {args.raw_data_root}")
+    parsed_data_root = args.raw_data_root.replace('raw', 'parsed')
+    print(f"Parsed data root directory: {parsed_data_root}")
     print(f"Glob path: {args.glob_path}")
     print(f"Mode: {args.mode}")
     if args.mode == 'split':
@@ -42,6 +46,7 @@ def main():
         csi1_path = csi0_path.replace('csi0', 'csi1')
         csi2_path = csi0_path.replace('csi0', 'csi2')
         if os.path.exists(csi0_path) and os.path.exists(csi1_path) and os.path.exists(csi2_path):
+            csi0_path = csi0_path.replace(parsed_data_root, '')
             all_csi_paths.append(csi0_path)  # just need one of the csi files
     length = len(all_csi_paths)
     print(f"Total number of complete CSI sets found: {length}")

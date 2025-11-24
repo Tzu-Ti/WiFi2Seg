@@ -1,6 +1,6 @@
 import sys
 sys.path.append("../..")  # Adjust the path to include the parent directory
-from dataset import CSI2MaskDataModule
+from dataset import CSI2MaskDataModule, CSI2Mask_Dataset
 from models import WiSegUNet
 import utils
 
@@ -32,7 +32,7 @@ class WiSegUNetLightning(LightningModule):
         data_configs = configs['Data']
         length = data_configs['length']  # 51
         RxTx_num = data_configs['RxTx_num']  # 6
-        in_channels = data_configs['subcarrier_num']  # 2025
+        in_channels = data_configs['subcarrier_num']  # 1974
 
         # Model configurations
         model_configs = configs['Model']
@@ -47,16 +47,17 @@ class WiSegUNetLightning(LightningModule):
         self.DICE = DiceScore(num_classes=1, average="micro")
         
 
-    def forward(self, csi):
-        csi = einops.rearrange(csi, 'b l (rx antennas) c -> b (l c) rx antennas', rx=3, antennas=2)
+    def forward(self, amp, pha):
+        # csi = torch.cat([amp, pha], dim=1)
+        csi = amp
         seg = self.model(csi)  # Forward pass through the model
 
         return seg
 
 
     def training_step(self, batch, batch_idx):
-        csi, mask = batch
-        seg = self.forward(csi)
+        amp, pha, mask = batch
+        seg = self.forward(amp, pha)
 
         bce_loss = self.BCE(seg, mask)
 
@@ -75,8 +76,8 @@ class WiSegUNetLightning(LightningModule):
         return total_loss
     
     def validation_step(self, batch, batch_idx, dataloader_idx):
-        csi, mask = batch
-        seg = self.forward(csi)
+        amp, pha, mask = batch
+        seg = self.forward(amp, pha)
 
         seg = torch.sigmoid(seg)  # Apply sigmoid to get probabilities
         seg = (seg > 0.5).float()  # Binarize the output based on the threshold
@@ -99,7 +100,7 @@ class WiSegUNetLightning(LightningModule):
             self.logger.experiment.add_images(f'val/{prefix}/images', img_grid, self.global_step, dataformats="CHW")
 
     def test_step(self, batch, batch_idx):
-        csi, mask = batch
+        amp, pha, mask = batch
         seg = self.forward(csi)
 
         seg = torch.sigmoid(seg)  # Apply sigmoid to get probabilities
@@ -138,7 +139,7 @@ def main(args):
     training_config = configs['Training']
 
     # Setup data module
-    dm = CSI2MaskDataModule(configs=configs)
+    dm = CSI2MaskDataModule(dataset_class=CSI2Mask_Dataset, configs=configs)
 
     # Setup Tensorboard logger
     logger = TensorBoardLogger("lightning_logs", 

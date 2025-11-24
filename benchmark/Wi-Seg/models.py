@@ -120,7 +120,7 @@ class UNetDecoder(nn.Module):
 
 
 class WiSegUNet(nn.Module):
-    def __init__(self, in_channels=103275, reduced_channels=512):
+    def __init__(self, in_channels=201348, reduced_channels=512):
         super(WiSegUNet, self).__init__()
         self.reducer = nn.Conv2d(in_channels, reduced_channels, kernel_size=1)
         self.encoder = EncoderWithSkips(in_channels=reduced_channels)
@@ -135,6 +135,6 @@ class WiSegUNet(nn.Module):
 if __name__ == "__main__":
     # Example usage
     model = WiSegUNet()
-    dummy_input = torch.randn(1, 103275, 3, 2)
+    dummy_input = torch.randn(1, 201348, 3, 2)
     output = model(dummy_input)
     print("output:", output.shape)  # [1, 1, 192, 256]

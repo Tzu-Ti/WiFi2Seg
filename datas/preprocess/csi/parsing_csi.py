@@ -3,16 +3,22 @@ import argparse
 import glob, os
 import numpy as np
 from multiprocessing.pool import ThreadPool
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 from tqdm import tqdm
 
 def parser():
+    """
+    example:
+    :param dataset_root: /root/bindingvolume/CSI_UNCC/raw
+    :param glob_path: env0/[FM][12]/*/*
+    :param csi_subcarrier: 2025
+    """
     parser = argparse.ArgumentParser(description="Parser for CSI dataset preprocessing")
     # data path
     parser.add_argument("--dataset_root", required=True, help="Path to the root directory of the CSI dataset")
     parser.add_argument("--glob_path", required=True, help="Glob path to find the CSI files")
     # data settings
-    parser.add_argument("--csi_subcarrier", type=int, default=2025, help="Number of subcarriers in CSI data")
+    parser.add_argument("--raw_csi_subcarrier", type=int, default=2025, help="Number of subcarriers in raw CSI data")
     parser.add_argument("--csi_length", type=int, default=25, help="Length of CSI data")
     # multi processing
     parser.add_argument("--num_workers", type=int, default=1, help="Number of workers for multiprocessing")
@@ -58,20 +64,17 @@ def parse_csi(rx_file, csi_subcarrier, csi_length):
     return rx_frames_dict
 
 def remove_guard_and_pilot(data):
-    if data.shape[2] == 1974:
-        return data
     first = data[:, :, :1001]
     second = data[:, :, 1024:1997]
     data = np.concatenate((first, second), axis=2)
     return data
 
-def linear_fitting(data):
+def phasefi_preprocessing(data, num_subcarriers):
     for i in range(len(data)):
         for j in range(len(data[i])):
-            noise_0 = np.poly1d(np.polyfit(np.arange(1001), data[i, j, :1001], 1))(np.arange(1001))
-            noise_tail = np.poly1d(np.polyfit(np.arange(1001, 1974), data[i, j, 1001:], 1))(np.arange(1001, 1974))
-            noise = np.concatenate([noise_0, noise_tail], axis=0)
-            data[i, j, :] = data[i, j, :] - noise
+            noise = np.poly1d(np.polyfit(np.arange(num_subcarriers), data[i, j, :], 1))(np.arange(num_subcarriers))
+            offset = np.mean(data[i, j, :])
+            data[i, j, :] = data[i, j, :] - noise - offset
     return data
 
 def save_npz(save_path, frame_mag, frame_phase):
@@ -89,80 +92,83 @@ def save_npz(save_path, frame_mag, frame_phase):
         phase=frame_phase
     )
 
-def register_csi_image(rx_files, rx_name, image_folders, csi_subcarrier, csi_length, num_workers):
-    for rx_file, img_folder in tqdm(zip(rx_files, image_folders), total=len(rx_files), desc=f"Processing {rx_name}"):
-        rx_frames_dict = parse_csi(rx_file, csi_subcarrier, csi_length)
+def register(rx_file, img_folder, rx_name, csi_subcarrier, csi_length):
+    rx_frames_dict = parse_csi(rx_file, csi_subcarrier, csi_length)
 
-        img_paths = sorted(glob.glob(os.path.join(img_folder, "*.jpg")))
-        # print(len(img_paths), "images found in", img_folder)
+    img_paths = sorted(glob.glob(os.path.join(img_folder, "*.jpg")))
 
-        # the timestamp of each csi frames in one .csi
-        rx_timestamps = list(rx_frames_dict.keys())
+    # the timestamp of each csi frames in one .csi
+    rx_timestamps = list(rx_frames_dict.keys())
 
-        finded = 0
-        # parsing image
-        for img_path in tqdm(img_paths, total=len(img_paths), desc="register image and CSI"):
-            img_name = os.path.basename(img_path) # get img name
-            img_name = os.path.splitext(img_name)[0] # without extension
-            timestamp = int(img_name)
+    finded = 0
+    # parsing image
+    # for img_path in tqdm(img_paths, total=len(img_paths), desc="register image and CSI"):
+    print(f"Registering CSI and images, {img_folder}, total: {len(img_paths)} ...")
+    for img_path in img_paths:
+        img_name = os.path.basename(img_path) # get img name
+        img_name = os.path.splitext(img_name)[0] # without extension
+        timestamp = int(img_name)
 
-            # find the closest csi frame to the image timestamp
-            center_ts_index = bin_search(rx_timestamps, timestamp)
+        # find the closest csi frame to the image timestamp
+        center_ts_index = bin_search(rx_timestamps, timestamp)
 
-            # check there are enough csi frames around the image timestamp
-            if center_ts_index > csi_length and center_ts_index < len(rx_timestamps) - csi_length:
-                # get the csi frames around the image timestamp
-                frames_ts = rx_timestamps[center_ts_index - csi_length:center_ts_index + csi_length + 1]
-            else: frames_ts = None
+        # check there are enough csi frames around the image timestamp
+        if center_ts_index > csi_length and center_ts_index < len(rx_timestamps) - csi_length:
+            # get the csi frames around the image timestamp
+            frames_ts = rx_timestamps[center_ts_index - csi_length:center_ts_index + csi_length + 1]
+        else: frames_ts = None
+
+        if frames_ts:
+            finded += 1
+            frame_mag = None
+            frame_phase = None
+            for ts in frames_ts:
+                # get the csi data of the current timestamp
+                data = rx_frames_dict[ts]
+                # split 2 antennas data
+                mag = data['Mag']
+                mags = np.concatenate([np.expand_dims(mag[:csi_subcarrier], axis=0),
+                                        np.expand_dims(mag[csi_subcarrier:], axis=0)], axis=0)
+                phase = data['Phase']
+                phases = np.concatenate([np.expand_dims(phase[:csi_subcarrier], axis=0),
+                                            np.expand_dims(phase[csi_subcarrier:], axis=0)], axis=0)
+                if frame_mag is None:
+                    frame_mag = np.expand_dims(mags, axis=0)
+                    frame_phase = np.expand_dims(phases, axis=0)
+                else:
+                    frame_mag = np.concatenate([frame_mag, np.expand_dims(mags, axis=0)], axis=0)
+                    frame_phase = np.concatenate([frame_phase, np.expand_dims(phases, axis=0)], axis=0)
             
-            executor = ThreadPoolExecutor(max_workers=num_workers)
-            futures = []
-            if frames_ts:
-                finded += 1
-                frame_mag = None
-                frame_phase = None
-                for ts in frames_ts:
-                    # get the csi data of the current timestamp
-                    data = rx_frames_dict[ts]
-                    # split 2 antennas data
-                    mag = data['Mag']
-                    mags = np.concatenate([np.expand_dims(mag[:csi_subcarrier], axis=0),
-                                           np.expand_dims(mag[csi_subcarrier:], axis=0)], axis=0)
-                    phase = data['Phase']
-                    phases = np.concatenate([np.expand_dims(phase[:csi_subcarrier], axis=0),
-                                             np.expand_dims(phase[csi_subcarrier:], axis=0)], axis=0)
-                    if frame_mag is None:
-                        frame_mag = np.expand_dims(mags, axis=0)
-                        frame_phase = np.expand_dims(phases, axis=0)
-                    else:
-                        frame_mag = np.concatenate([frame_mag, np.expand_dims(mags, axis=0)], axis=0)
-                        frame_phase = np.concatenate([frame_phase, np.expand_dims(phases, axis=0)], axis=0)
-                
-                # remove pilot and guard
-                frame_phase = remove_guard_and_pilot(frame_phase)
-                frame_mag = remove_guard_and_pilot(frame_mag)
-                # phase, linear fitting to remove noise
-                frame_phase = linear_fitting(frame_phase)
-                # convert to float32
-                frame_mag = frame_mag.astype(np.float32)
-                frame_phase = frame_phase.astype(np.float32)
-                # save the csi data and image data
-                save_path = img_path.replace('raw', 'parsed')
-                save_path = save_path.replace('rgb', rx_name)
-                save_path = save_path.replace('.jpg', '.npz')
-                # use thread to save data
-                futures.append(executor.submit(save_npz, save_path, frame_mag, frame_phase))
+            # remove pilot and guard
+            frame_phase = remove_guard_and_pilot(frame_phase)
+            frame_mag = remove_guard_and_pilot(frame_mag)
+            removed_csi_subcarriers = frame_phase.shape[2]
+            # phasefi preprocess to remove noise
+            frame_phase = phasefi_preprocessing(frame_phase, removed_csi_subcarriers)
+            # convert to float32
+            frame_mag = frame_mag.astype(np.float32)
+            frame_phase = frame_phase.astype(np.float32)
+            # save the csi data and image data
+            save_path = img_path.replace('raw', 'parsed')
+            save_path = save_path.replace('rgb', rx_name)
+            save_path = save_path.replace('.jpg', '.npz')
 
-            # 等所有檔案都寫完
-            for f in as_completed(futures):
-                f.result()  # 如需錯誤處理可包 try/except
-            executor.shutdown(wait=True)
+            save_npz(save_path, frame_mag, frame_phase)
 
-        # print(f"Found {finded} images with enough csi frames.")
-        if finded == 0:
-            with open('problem data.txt', 'a') as f:
-                f.write(f"{img_folder}\n")
-        # print("-------------------------------------")
+    if finded == 0:
+        with open('problem data.txt', 'a') as f:
+            f.write(f"{img_folder}\n")
+
+def register_csi_image(rx_files, rx_name, image_folders, csi_subcarrier, csi_length, num_workers):
+    # multi thread
+    futures = []
+
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        for rx_file, img_folder in tqdm(zip(rx_files, image_folders), total=len(rx_files), desc=f"Processing {rx_name}"):
+            # use thread to process each csi file and image folder
+            futures.append(executor.submit(register, rx_file, img_folder, rx_name, csi_subcarrier, csi_length))
+        for f in tqdm(as_completed(futures), total=len(futures), desc=f"Processing {rx_name}"):
+            f.result()  # 如需錯誤處理可包 try/except
 
 def main():
     args = parser()
@@ -184,13 +190,9 @@ def main():
     if not (len(rx0_files) == len(rx1_files) == len(rx2_files) == len(image_folders)):
         raise ValueError("The number of CSI files and image files do not match.")
 
-    register_csi_image(rx0_files, 'csi0', image_folders, args.csi_subcarrier, args.csi_length, args.num_workers)
-    register_csi_image(rx1_files, 'csi1', image_folders, args.csi_subcarrier, args.csi_length, args.num_workers)
-    register_csi_image(rx2_files, 'csi2', image_folders, args.csi_subcarrier, args.csi_length, args.num_workers)
-    
-
-    
-
-        
+    register_csi_image(rx0_files, 'csi0', image_folders, args.raw_csi_subcarrier, args.csi_length, args.num_workers)
+    register_csi_image(rx1_files, 'csi1', image_folders, args.raw_csi_subcarrier, args.csi_length, args.num_workers)
+    register_csi_image(rx2_files, 'csi2', image_folders, args.raw_csi_subcarrier, args.csi_length, args.num_workers)
+  
 if __name__ == "__main__":
     main()
